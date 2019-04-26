@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+from torch.utils.data import TensorDataset, DataLoader
 
 no_grad_tensor = lambda x: torch.tensor(x, dtype=torch.float, requires_grad=False)
 
@@ -15,9 +16,9 @@ class BioLinear(nn.Linear):
 		self._delta = no_grad_tensor(delta)
 		self._k = k
 		self._prec = no_grad_tensor(1e-30)
-		self.weight.data.normal_()
+		self.weight.data.uniform_(1e-5, 1) # Seems to work better
 
-	def bio_step(self, inputs, eps):
+	def train_step(self, inputs, eps):
 		with torch.no_grad():
 			synapses = self.weight.data
 			hid = synapses.shape[0]
@@ -40,3 +41,17 @@ class BioLinear(nn.Linear):
 			if nc<self._prec:
 				nc=self._prec
 			synapses += eps*(ds/nc)
+
+	def train(self, train_data, epochs, batch_size=100, epsilon=2e-2):
+		assert type(train_data) == torch.Tensor, 'train_data has to be a torch.Tensor'
+
+		dataset = TensorDataset(train_data)
+		loader  = DataLoader(dataset,
+			batch_size = batch_size,
+			shuffle    = True
+		)
+		for nep in range(epochs):
+			eps = epsilon*(1-nep/epochs)
+			for inputs, in loader:
+				self.train_step(inputs, eps)
+			yield self.weight.data

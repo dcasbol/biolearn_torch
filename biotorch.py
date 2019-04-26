@@ -5,12 +5,16 @@ from time import time
 from torch.utils.data import DataLoader
 import numpy as np
 from biolayer import BioLinear
+import scipy.io
 
-Nc=10 # num. of classes
-N=784 # Sample size
-Ns=60000 # Num. samples in training set
+Nc   = 10   # num. of classes
+N    = 784  # Sample size
+Nep  = 300  # Number of epochs
+eps0 = 2e-2 # Learning rate
 
-no_grad_tensor = lambda x: torch.tensor(x, dtype=torch.float, requires_grad=False)
+Kx=5
+Ky=5
+hid=Kx*Ky    # number of hidden units that are displayed in Ky by Kx array
 
 def draw_weights(synapses, Kx, Ky):
 	yy=0
@@ -27,40 +31,18 @@ def draw_weights(synapses, Kx, Ky):
 	fig.canvas.draw()
 	fig.show()
 
-eps0=no_grad_tensor(2e-2)    # learning rate
-prec=no_grad_tensor(1e-30)
-
-Kx=5
-Ky=5
-hid=Kx*Ky    # number of hidden units that are displayed in Ky by Kx array
-
-Nep=200      # number of epochs
-Num=100      # size of the minibatch
-
-delta=0.4    # Strength of the anti-hebbian learning
-p=2.0        # Lebesgue norm of the weights
-k=2          # ranking parameter, must be integer that is bigger or equal than 2
-
 fig=plt.figure(figsize=(6.5,5))
 
-mnist_data  = mnist.MnistDataset()
-data_loader = DataLoader(mnist_data,
-	batch_size = Num,
-	shuffle    = True
-)
+mat = scipy.io.loadmat('mnist_all.mat')
+M=np.zeros((0,N))
+for i in range(Nc):
+	M=np.concatenate((M, mat['train'+str(i)]), axis=0)
+M=M/255.0
+M = torch.tensor(M, dtype=torch.float)
 
 bio_linear = BioLinear(N, hid)
 
-for nep in range(Nep):
-
-	eps=eps0*(1-nep/Nep) # lr annealing
-	print(eps)
-
-	t0 = time()
-
-	for inputs in data_loader:
-		bio_linear.bio_step(inputs, eps)
-
-	print(time()-t0) #0.42
-		
+for weight in bio_linear.train(M, Nep, batch_size=Num, epsilon=eps0):
 	draw_weights(bio_linear.weight.data, Kx, Ky)
+		
+	
