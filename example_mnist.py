@@ -10,6 +10,7 @@ import scipy.io
 Nc   = 10   # num. of classes
 N    = 784  # Sample size
 Nep  = 300  # Number of epochs
+Num  = 100  # Batch size
 eps0 = 2e-2 # Learning rate
 
 Kx=5
@@ -31,14 +32,13 @@ def draw_weights(synapses, Kx, Ky):
 	fig.canvas.draw()
 	fig.show()
 
-fig=plt.figure(figsize=(6.5,5))
+fig=plt.figure(figsize=(13,10))
 
 mat = scipy.io.loadmat('mnist_all.mat')
 M=np.zeros((0,N))
 for i in range(Nc):
 	M=np.concatenate((M, mat['train'+str(i)]), axis=0)
-M=M/255.0
-M = torch.tensor(M, dtype=torch.float)
+M = torch.tensor(M, dtype=torch.float)/255.0
 
 bio_linear = BioLinear(N, hid)
 
