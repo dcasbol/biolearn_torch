@@ -37,23 +37,19 @@ def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 			nc=prec
 		return eps*(ds/nc)
 
-class BioLinear(nn.Linear):
-
-	def __init__(self, in_features, out_features, p=2.0, delta=0.4, k=2):
-		super(BioLinear, self).__init__(in_features, out_features, bias=False)
-
+class _BioBase(object):
+	def __init__(self, p=2.0, delta=0.4, k=2):
 		assert p >= 2, 'Lebesgue norm must be greater or equal than 2'
 		assert k >= 2, 'ranking parameter must be greater or equal than 2'
-		assert k <= out_features, "ranking parameter can't exceed number of hidden units"
+		n_hiddens = getattr(self, 'out_features', None) or self.out_channels
+		assert k <= n_hiddens, "ranking parameter can't exceed number of hidden units"
 		self._p = no_grad_tensor(p)
 		self._delta = no_grad_tensor(delta)
 		self._k = k
 		self.weight.data.uniform_(1e-5, 1) # Seems to work better
 
 	def train_step(self, inputs, eps):
-		synapses = self.weight.data
-		wdelta = _compute_step_linear(inputs, synapses, self._p, self._delta, self._k, eps)
-		synapses += wdelta
+		raise NotImplementedError
 
 	def train(self, train_data, epochs, batch_size=100, epsilon=2e-2):
 		assert type(train_data) == torch.Tensor, 'train_data has to be a torch.Tensor'
@@ -69,17 +65,24 @@ class BioLinear(nn.Linear):
 				self.train_step(inputs, eps)
 			yield self.weight.data
 
-class BioConv2d(nn.Conv2d):
+class BioLinear(_BioBase, nn.Linear):
+
+	def __init__(self, in_features, out_features, **kwargs):
+		nn.Linear.__init__(self, in_features, out_features, bias=False)
+		_BioBase.__init__(self, **kwargs)
+
+	def train_step(self, inputs, eps):
+		synapses = self.weight.data
+		wdelta = _compute_step_linear(inputs, synapses, self._p, self._delta, self._k, eps)
+		synapses += wdelta
+
+class BioConv2d(_BioBase, nn.Conv2d):
 	def __init__(self, in_channels, out_channels, kernel_size,
 		stride=1, padding=0, dilation=1, p=2.0, delta=0.4, k=2):
-		in_features = in_channels*kernel_size*kernel_size
-		super(BioConv2d, self).__init__(in_channels, out_channels, kernel_size,
+		nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size,
 			stride=stride, padding=padding, dilation=dilation, bias=False)
-		self.weight.data.uniform_(1e-5, 1)
-		self._p = p
-		self._delta = delta
-		self._k = k
-		self._in_features = in_features
+		_BioBase.__init__(self, p=p, delta=delta, k=k)
+		self._in_features = in_channels*kernel_size*kernel_size
 
 	def train_step(self, inputs, eps):
 		assert len(inputs.shape) == 4, 'Inputs must be images with shape [B,C,H,W]'
@@ -93,20 +96,6 @@ class BioConv2d(nn.Conv2d):
 		wdelta = _compute_step_linear(blocks, syn_flat, self._p, self._delta, self._k, eps)
 		wdelta = wdelta.view(self.out_channels, self.in_channels, self.kernel_size[0], self.kernel_size[1])
 		synapses += wdelta
-
-	def train(self, train_data, epochs, batch_size=100, epsilon=2e-2):
-		assert type(train_data) == torch.Tensor, 'train_data has to be a torch.Tensor'
-
-		dataset = TensorDataset(train_data)
-		loader  = DataLoader(dataset,
-			batch_size = batch_size,
-			shuffle    = True
-		)
-		for nep in range(epochs):
-			eps = epsilon*(1-nep/epochs)
-			for inputs, in loader:
-				self.train_step(inputs, eps)
-			yield self.weight.data
 
 def _compute_step_conv(inputs, synapses, stride, padding, dilation, p, delta, k, eps):
 	with torch.no_grad():

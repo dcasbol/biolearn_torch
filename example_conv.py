@@ -12,7 +12,7 @@ N    = 784  # Sample size
 Nep  = 300  # Number of epochs
 Num  = 100  # Batch size
 eps0 = 2e-2 # Learning rate
-kz   = 5    # kernel size
+S    = 5    # kernel size
 
 Kx=5
 Ky=5
@@ -20,10 +20,10 @@ hid=Kx*Ky    # number of hidden units that are displayed in Ky by Kx array
 
 def draw_weights(synapses, Kx, Ky):
 	yy=0
-	HM=np.zeros((kz*Ky,kz*Kx))
+	HM=np.zeros((S*Ky,S*Kx))
 	for y in range(Ky):
 		for x in range(Kx):
-			HM[y*kz:(y+1)*kz,x*kz:(x+1)*kz]=synapses[yy,:].reshape(kz,kz)
+			HM[y*S:(y+1)*S,x*S:(x+1)*S]=synapses[yy,:].reshape(S,S)
 			yy += 1
 	plt.clf()
 	nc=np.amax(np.absolute(HM))
@@ -41,10 +41,10 @@ for i in range(Nc):
 	M=np.concatenate((M, mat['train'+str(i)]), axis=0)
 M = torch.tensor(M, dtype=torch.float).view(-1,1, 28,28)/255.0
 
-bio_linear = BioConv2d(1, hid, kz)
+bio_conv = BioConv2d(1, hid, S)
 
-for weight in bio_linear.train(M, Nep, batch_size=Num, epsilon=eps0):
-	weights = bio_linear.weight.data.view(hid,kz*kz).detach().numpy()
+for weight in bio_conv.train(M, Nep, batch_size=Num, epsilon=eps0):
+	weights = bio_conv.weight.data.view(hid,S*S).detach().numpy()
 	draw_weights(weights, Kx, Ky)
 		
 	
