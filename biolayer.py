@@ -46,7 +46,7 @@ class _BioBase(object):
 		self._p = no_grad_tensor(p)
 		self._delta = no_grad_tensor(delta)
 		self._k = k
-		self.weight.data.uniform_(1e-5, 1) # Seems to work better
+		self.weight.data.uniform_(1e-5, 1) # Seems to work better than normal_
 
 	def train_step(self, inputs, eps):
 		raise NotImplementedError
@@ -61,6 +61,7 @@ class _BioBase(object):
 		)
 		for nep in range(epochs):
 			eps = epsilon*(1-nep/epochs)
+			print(eps)
 			for inputs, in loader:
 				self.train_step(inputs, eps)
 			yield self.weight.data
