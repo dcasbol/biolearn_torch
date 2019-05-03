@@ -32,7 +32,7 @@ def draw_weights(synapses, Kx, Ky):
 	fig.canvas.draw()
 	fig.show()
 
-fig=plt.figure(figsize=(13,10))
+fig=plt.figure(figsize=(6.5,5))
 
 mat = scipy.io.loadmat('mnist_all.mat')
 M=np.zeros((0,N))
