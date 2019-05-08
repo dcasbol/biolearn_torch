@@ -10,10 +10,9 @@ import scipy.io
 
 CIFAR_DIR = '~/DataSets/'
 
-N    = 784  # Sample size
 Nep  = 300  # Number of epochs
-Num  = 25   # Batch size
-eps0 = 8e-3 # Learning rate
+Num  = 50   # Batch size
+eps0 = 1e-2 # Learning rate
 S    = 5    # kernel size
 
 Kx=10
@@ -39,7 +38,7 @@ fig.show()
 
 cifar = CIFAR10(CIFAR_DIR)
 with torch.no_grad():
-	cifar_data = torch.tensor(cifar.data.view()[:5000], dtype=torch.float) / 255.
+	cifar_data = torch.tensor(cifar.data.view()[:1000], dtype=torch.float) / 255.
 	cifar_data = cifar_data.transpose(1,3).transpose(2,3)
 
 bio_conv = BioConv2d(3, hid, S)

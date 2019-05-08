@@ -26,8 +26,8 @@ def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 		y2 = y
 
 		yl=torch.zeros(hid, Num)
-		yl[y1,idx_batch]=1.0
-		yl[y2,idx_batch]=-delta
+		yl[y1,idx_batch]=1.0*(tot_input[y1,idx_batch]>0).float()
+		yl[y2,idx_batch]=-delta*(tot_input[y2,idx_batch]>0).float()
 		
 		xx=(yl*tot_input).sum(1)
 		ds  = torch.matmul(yl,inputs) - xx.view(xx.shape[0],1).repeat(1,N)*synapses
@@ -46,7 +46,7 @@ class _BioBase(object):
 		self._p = no_grad_tensor(p)
 		self._delta = no_grad_tensor(delta)
 		self._k = k
-		self.weight.data.uniform_(1e-5, 1) # Seems to work better than normal_
+		self.weight.data.uniform_(0, 1) # Seems to work better than normal_
 
 	def train_step(self, inputs, eps):
 		raise NotImplementedError
@@ -61,7 +61,6 @@ class _BioBase(object):
 		)
 		for nep in range(epochs):
 			eps = epsilon*(1-nep/epochs)
-			print(eps)
 			for inputs, in loader:
 				self.train_step(inputs, eps)
 			yield self.weight.data
