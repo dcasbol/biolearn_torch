@@ -3,11 +3,14 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 from time import time
+from pynput import keyboard
 
 no_grad_tensor = lambda x: torch.tensor(x, dtype=torch.float, requires_grad=False)
 
 def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 	with torch.no_grad():
+		inputs /= inputs.norm(1)
+
 		prec = no_grad_tensor(1e-30)
 		hid = synapses.shape[0]
 		Num = inputs.shape[0]
@@ -26,15 +29,13 @@ def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 		y2 = y
 
 		yl=torch.zeros(hid, Num)
-		yl[y1,idx_batch]=1.0*(tot_input[y1,idx_batch]>0).float()
+		yl[y1,idx_batch]=1.
 		yl[y2,idx_batch]=-delta*(tot_input[y2,idx_batch]>0).float()
 		
 		xx=(yl*tot_input).sum(1)
 		ds  = torch.matmul(yl,inputs) - xx.view(xx.shape[0],1).repeat(1,N)*synapses
 		
-		nc=ds.abs().max()
-		if nc<prec:
-			nc=prec
+		nc=ds.abs().max() + prec
 		return eps*(ds/nc)
 
 class _BioBase(object):
@@ -46,24 +47,36 @@ class _BioBase(object):
 		self._p = no_grad_tensor(p)
 		self._delta = no_grad_tensor(delta)
 		self._k = k
-		self.weight.data.uniform_(0, 1) # Seems to work better than normal_
+		self.weight.data.uniform_(1e-5, 1.)
 
 	def train_step(self, inputs, eps):
 		raise NotImplementedError
 
-	def train(self, train_data, epochs, batch_size=100, epsilon=2e-2):
-		assert type(train_data) == torch.Tensor, 'train_data has to be a torch.Tensor'
+	def train(self, *args, **kwargs):
+		t = type(args[0])
+		assert t == torch.Tensor or t == DataLoader, 'Only dataset as Tensor or DataLoader allowed'
+		if type(args[0]) == torch.Tensor:
+			return self._train_from_tensor(*args, **kwargs)
+		else:
+			return self._train_from_dataloader(*args, **kwargs)
 
+	def _train_from_tensor(self, train_data, epochs, batch_size=100, epsilon=2e-2):
 		dataset = TensorDataset(train_data)
 		loader  = DataLoader(dataset,
 			batch_size = batch_size,
 			shuffle    = True
 		)
+		return self._train_from_dataloader(loader, epochs, epsilon=epsilon)
+
+	def _train_from_dataloader(self, loader, epochs, epsilon=2e-2):
+		t0 = time()
 		for nep in range(epochs):
 			eps = epsilon*(1-nep/epochs)
-			for inputs, in loader:
+			for i, (inputs,) in enumerate(loader):
 				self.train_step(inputs, eps)
-			yield self.weight.data
+				if time()-t0 >= 0.25:
+					t0 = time()
+					yield self.weight.data
 
 class BioLinear(_BioBase, nn.Linear):
 
@@ -91,11 +104,27 @@ class BioConv2d(_BioBase, nn.Conv2d):
 		with torch.no_grad():
 			blocks = F.unfold(inputs, self.kernel_size,
 				dilation=self.dilation, padding=self.padding, stride=self.stride)
+
+			"""
+			TODO include random patch selection?
+			It seems that it generates more diverse patches, as there is
+			high redundancy intra-image.
+			"""
+			random_patches = True
+			if random_patches:
+				perm = torch.randperm(blocks.size(0))
+				idx = perm[:inputs.shape[0]]
+				blocks = blocks[idx]
+
 			blocks = blocks.transpose(2,1).contiguous().view(-1, self._in_features)
 			syn_flat = synapses.view(synapses.shape[0], -1)
+
 		wdelta = _compute_step_linear(blocks, syn_flat, self._p, self._delta, self._k, eps)
-		wdelta = wdelta.view(self.out_channels, self.in_channels, self.kernel_size[0], self.kernel_size[1])
-		synapses += wdelta
+
+		with torch.no_grad():
+			syn_flat += wdelta
+			#syn_flat = (syn_flat / syn_flat.norm(dim=1, keepdim=True)) * 10.
+
 
 def _compute_step_conv(inputs, synapses, stride, padding, dilation, p, delta, k, eps):
 	with torch.no_grad():
