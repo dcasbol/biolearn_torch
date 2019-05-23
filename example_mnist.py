@@ -10,7 +10,7 @@ Nc   = 10   # num. of classes
 N    = 784  # Sample size
 Nep  = 300  # Number of epochs
 Num  = 100  # Batch size
-eps0 = 2e-2 # Learning rate
+eps0 = 2e-3 # Learning rate
 
 Kx=5
 Ky=5
@@ -23,7 +23,7 @@ bio_linear = BioLinear(N, hid)
 vis = LinearLayerVisualizer(bio_linear, as_heatmap=True)
 
 try:
-	for weight in bio_linear.train(M, Nep, batch_size=Num, epsilon=eps0):
+	for weight in bio_linear.train(M, batch_size=Num, epsilon=eps0):
 		vis.update()
 except KeyboardInterrupt:
 	vis.close()

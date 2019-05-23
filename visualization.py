@@ -16,17 +16,23 @@ class LayerVisualizer(object):
 		yy = 0
 		for i in range(self._n):
 			y, x = i//self._Kx, i%self._Kx
-			kernel = self._w[i].numpy()
+			kernel = self._w[i].cpu().numpy()
 			if intra_norm:
 				kernel -= np.amin(kernel)
 				kernel /= np.amax(kernel) + 1e-10
 			self._vals[y*Sy:(y+1)*Sy,x*Sx:(x+1)*Sx,:]=kernel
 		if not intra_norm and not monochrome:
-			self._vals -= np.amin(self._vals)
-			self._vals /= np.amax(self._vals) + 1e-10
+			vmin = np.amin(self._vals)
+			vmax = np.amax(self._vals)
+			vmin, vmax = min(vmin, -vmax), max(vmax, -vmin)
+			self._vals /= 2*abs(vmax)
+			self._vals += 0.5
+			#self._vals -= np.amin(self._vals)
+			#self._vals /= np.amax(self._vals) + 1e-10
 		self._img.set_data(self._vals[:,:,0] if monochrome else self._vals)
 		if monochrome:
 			vmin, vmax = self._img.get_clim()
+			vmin, vmax = min(vmin, -vmax), max(vmax, -vmin)
 			vmin = 0.9*vmin + 0.1*np.amin(self._vals)
 			vmax = 0.9*vmax + 0.1*np.amax(self._vals)
 			self._img.set_clim(vmin, vmax)
