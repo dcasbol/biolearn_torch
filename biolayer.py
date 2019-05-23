@@ -9,7 +9,7 @@ no_grad_tensor = lambda x: torch.tensor(x, dtype=torch.float, requires_grad=Fals
 
 def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 	with torch.no_grad():
-		inputs /= inputs.norm(1)
+		inputs /= inputs.norm(1) + 1e-10
 
 		prec = no_grad_tensor(1e-30)
 		hid = synapses.shape[0]
@@ -47,20 +47,27 @@ class _BioBase(object):
 		self._p = no_grad_tensor(p)
 		self._delta = no_grad_tensor(delta)
 		self._k = k
-		self.weight.data.uniform_(1e-5, 1.)
+		self.weight.data.uniform_(1e-5,0.5)
+		w = self.weight.data
+		with torch.no_grad():
+			if len(self.weight) == 4:
+				norm = w.view(w.shape[0], -1).norm(1).view(w.shape[0],1,1,1)
+			else:
+				norm = w.norm(1)
+			w /= norm
 
 	def train_step(self, inputs, eps):
 		raise NotImplementedError
 
 	def train(self, *args, **kwargs):
-		t = type(args[0])
-		assert t == torch.Tensor or t == DataLoader, 'Only dataset as Tensor or DataLoader allowed'
+		ds = args[0]
+		assert isinstance(ds, torch.Tensor) or isinstance(ds, DataLoader), 'Only dataset as Tensor or DataLoader allowed'
 		if type(args[0]) == torch.Tensor:
 			return self._train_from_tensor(*args, **kwargs)
 		else:
 			return self._train_from_dataloader(*args, **kwargs)
 
-	def _train_from_tensor(self, train_data, epochs, batch_size=100, epsilon=2e-2):
+	def _train_from_tensor(self, train_data, epochs=None, batch_size=100, epsilon=2e-2):
 		dataset = TensorDataset(train_data)
 		loader  = DataLoader(dataset,
 			batch_size = batch_size,
@@ -68,13 +75,17 @@ class _BioBase(object):
 		)
 		return self._train_from_dataloader(loader, epochs, epsilon=epsilon)
 
-	def _train_from_dataloader(self, loader, epochs, epsilon=2e-2):
+	def _train_from_dataloader(self, loader, epochs=None, epsilon=2e-2):
 		t0 = time()
-		for nep in range(epochs):
-			eps = epsilon*(1-nep/epochs)
-			for i, (inputs,) in enumerate(loader):
-				self.train_step(inputs, eps)
-				if time()-t0 >= 0.25:
+		max_epochs = 300 if epochs is None else epochs
+		nep = -1
+		while epochs is None or nep < epochs:
+			nep += 1
+			ep = min(nep, max_epochs-1)
+			eps = epsilon*(1-ep/max_epochs)
+			for i, batch_samples in enumerate(loader):
+				self.train_step(batch_samples[0], eps)
+				if epochs is None and time()-t0 >= 0.25:
 					t0 = time()
 					yield self.weight.data
 
@@ -91,30 +102,34 @@ class BioLinear(_BioBase, nn.Linear):
 
 class BioConv2d(_BioBase, nn.Conv2d):
 	def __init__(self, in_channels, out_channels, kernel_size,
-		stride=1, padding=0, dilation=1, p=2.0, delta=0.4, k=2):
+		stride=1, padding=0, dilation=1, **kwargs):
 		nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size,
 			stride=stride, padding=padding, dilation=dilation, bias=False)
-		_BioBase.__init__(self, p=p, delta=delta, k=k)
+		_BioBase.__init__(self, **kwargs)
 		self._in_features = in_channels*kernel_size*kernel_size
+		self._output_shape = None
+
+	def _extract_blocks(self, inputs):
+		return F.unfold(inputs, self.kernel_size,
+			dilation=self.dilation, padding=self.padding, stride=self.stride)
 
 	def train_step(self, inputs, eps):
-		assert len(inputs.shape) == 4, 'Inputs must be images with shape [B,C,H,W]'
+		assert len(inputs.shape) == 4, 'Inputs must be images with shape [B,C,H,W], {}'.format(inputs.shape)
 		synapses = self.weight.data
 		
 		with torch.no_grad():
-			blocks = F.unfold(inputs, self.kernel_size,
-				dilation=self.dilation, padding=self.padding, stride=self.stride)
+			blocks = self._extract_blocks(inputs)
 
 			"""
 			TODO include random patch selection?
 			It seems that it generates more diverse patches, as there is
 			high redundancy intra-image.
 			"""
-			random_patches = True
+			random_patches = False
 			if random_patches:
-				perm = torch.randperm(blocks.size(0))
-				idx = perm[:inputs.shape[0]]
-				blocks = blocks[idx]
+				perm = torch.randperm(blocks.size(2))
+				idx = perm[:5]
+				blocks = blocks[:,:,idx]
 
 			blocks = blocks.transpose(2,1).contiguous().view(-1, self._in_features)
 			syn_flat = synapses.view(synapses.shape[0], -1)
@@ -123,8 +138,6 @@ class BioConv2d(_BioBase, nn.Conv2d):
 
 		with torch.no_grad():
 			syn_flat += wdelta
-			#syn_flat = (syn_flat / syn_flat.norm(dim=1, keepdim=True)) * 10.
-
 
 def _compute_step_conv(inputs, synapses, stride, padding, dilation, p, delta, k, eps):
 	with torch.no_grad():
