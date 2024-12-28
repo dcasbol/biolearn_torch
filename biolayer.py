@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 from time import time
-from pynput import keyboard
 
 no_grad_tensor = lambda x: torch.tensor(x, dtype=torch.float, requires_grad=False)
+
 
 def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 	with torch.no_grad():
@@ -24,7 +24,7 @@ def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 		y1 = torch.argmax(values, 0)
 		y = y1
 		for i in range(k-1):
-			values[y,idx_batch] = -1e10
+			values[y, idx_batch] = -1e10
 			y = torch.argmax(values, 0)
 		y2 = y
 
@@ -38,8 +38,10 @@ def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 		nc=ds.abs().max() + prec
 		return eps*(ds/nc)
 
+
 class _BioBase(object):
-	def __init__(self, p=2.0, delta=0.4, k=2):
+
+	def __init__(self, p=2.0, delta=0.4, k=2, device=None):
 		assert p >= 2, 'Lebesgue norm must be greater or equal than 2'
 		assert k >= 2, 'ranking parameter must be greater or equal than 2'
 		n_hiddens = getattr(self, 'out_features', None) or self.out_channels
@@ -47,7 +49,7 @@ class _BioBase(object):
 		self._p = no_grad_tensor(p)
 		self._delta = no_grad_tensor(delta)
 		self._k = k
-		self.weight.data.uniform_(1e-5,0.5)
+		self.weight.data.normal_()
 		w = self.weight.data
 		with torch.no_grad():
 			if len(self.weight) == 4:
@@ -69,10 +71,7 @@ class _BioBase(object):
 
 	def _train_from_tensor(self, train_data, epochs=None, batch_size=100, epsilon=2e-2):
 		dataset = TensorDataset(train_data)
-		loader  = DataLoader(dataset,
-			batch_size = batch_size,
-			shuffle    = True
-		)
+		loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 		return self._train_from_dataloader(loader, epochs, epsilon=epsilon)
 
 	def _train_from_dataloader(self, loader, epochs=None, epsilon=2e-2):
@@ -89,6 +88,7 @@ class _BioBase(object):
 					t0 = time()
 					yield self.weight.data
 
+
 class BioLinear(_BioBase, nn.Linear):
 
 	def __init__(self, in_features, out_features, **kwargs):
@@ -99,13 +99,17 @@ class BioLinear(_BioBase, nn.Linear):
 		synapses = self.weight.data
 		wdelta = _compute_step_linear(inputs, synapses, self._p, self._delta, self._k, eps)
 		synapses += wdelta
+		# synapses *= (1 - 1e-5)  # TODO: add weight decay
+
 
 class BioConv2d(_BioBase, nn.Conv2d):
+
 	def __init__(self, in_channels, out_channels, kernel_size,
-		stride=1, padding=0, dilation=1, **kwargs):
+	             stride=1, padding=0, dilation=1, **kwargs):
 		nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size,
-			stride=stride, padding=padding, dilation=dilation, bias=False)
+		                   stride=stride, padding=padding, dilation=dilation, bias=False)
 		_BioBase.__init__(self, **kwargs)
+		self.weight.data.normal_().abs_()
 		self._in_features = in_channels*kernel_size*kernel_size
 		self._output_shape = None
 
@@ -125,7 +129,7 @@ class BioConv2d(_BioBase, nn.Conv2d):
 			It seems that it generates more diverse patches, as there is
 			high redundancy intra-image.
 			"""
-			random_patches = False
+			random_patches = True
 			if random_patches:
 				perm = torch.randperm(blocks.size(2))
 				idx = perm[:5]
@@ -139,12 +143,12 @@ class BioConv2d(_BioBase, nn.Conv2d):
 		with torch.no_grad():
 			syn_flat += wdelta
 
+
 def _compute_step_conv(inputs, synapses, stride, padding, dilation, p, delta, k, eps):
 	with torch.no_grad():
 		prec = no_grad_tensor(1e-30)
 		hid = synapses.shape[0]
-		N   = synapses.shape[1]*synapses.shape[2]*synapses.shape[3] # inputs to neuron
-		batch_size = inputs.shape[0]
+		N   = synapses.shape[1]*synapses.shape[2]*synapses.shape[3]  # inputs to neuron
 
 		sig=synapses.sign()
 		tot_input=F.conv2d(inputs, sig*synapses.abs().pow(p-1),

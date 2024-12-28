@@ -1,114 +1,60 @@
-import matplotlib.pyplot as plt
+import pygame
+import torch
 import numpy as np
+from dataclasses import dataclass
 
+
+@dataclass
 class LayerVisualizer(object):
-	"""
-	Abstract class for the visualization of weights convergence.
-	"""
-	def _init_plot(self, figsize):
-		raise NotImplementedError
+	weights: torch.Tensor
+	window_width: int = 250
 
-	def _update(self):
-		raise NotImplementedError
+	def __post_init__(self):
 
-	def _update_img(self, monochrome=False, intra_norm=False):
-		Sy, Sx = self._Sy, self._Sx
-		yy = 0
-		for i in range(self._n):
-			y, x = i//self._Kx, i%self._Kx
-			kernel = self._w[i].cpu().numpy()
-			if intra_norm:
-				kernel -= np.amin(kernel)
-				kernel /= np.amax(kernel) + 1e-10
-			self._vals[y*Sy:(y+1)*Sy,x*Sx:(x+1)*Sx,:]=kernel
-		if not intra_norm and not monochrome:
-			vmin = np.amin(self._vals)
-			vmax = np.amax(self._vals)
-			vmin, vmax = min(vmin, -vmax), max(vmax, -vmin)
-			self._vals /= 2*abs(vmax)
-			self._vals += 0.5
-			#self._vals -= np.amin(self._vals)
-			#self._vals /= np.amax(self._vals) + 1e-10
-		self._img.set_data(self._vals[:,:,0] if monochrome else self._vals)
-		if monochrome:
-			vmin, vmax = self._img.get_clim()
-			vmin, vmax = min(vmin, -vmax), max(vmax, -vmin)
-			vmin = 0.9*vmin + 0.1*np.amin(self._vals)
-			vmax = 0.9*vmax + 0.1*np.amax(self._vals)
-			self._img.set_clim(vmin, vmax)
-		self._fig.canvas.draw()
+		# Keep a view of weights which is more suitable for visualization
+		weights = self.weights.detach()
+		if len(weights.shape) == 2:
+			num_neurons, num_inputs = weights.shape
+			depth = 1
+		else:
+			num_neurons, kernel_height, kernel_width, depth = weights.shape
+			num_inputs = kernel_height * kernel_width
+		self._Sy = int(np.sqrt(num_inputs))
+		self._Sx = num_inputs//self._Sy
+		assert self._Sx * self._Sy == num_inputs, \
+			f"Inputs and outputs should be square, got {num_inputs=}, {num_neurons=}"
+		self._Ky = int(np.sqrt(num_neurons))
+		self._Kx = num_neurons//self._Ky
+		self.weights = weights.view(self._Ky, self._Kx, self._Sy, self._Sx, depth)
 
-	def close(self):
-		plt.close(self._fig)
-
-class ConvLayerVisualizer(LayerVisualizer):
-	"""
-	This class helps visualize the kernels of a conv layer.
-	Only first 3 input dimensions of each kernel are displayed.
-	"""
-
-	def __init__(self, conv_layer, figsize=(5,5), intra_kernel_norm=False):
-		self._Sx, self._Sy = conv_layer.kernel_size
-		self._n = conv_layer.out_channels
-		self._Kx = int(np.round(np.sqrt(self._n)))
-		self._Ky = int(np.ceil(self._n/self._Kx))
-		self._w = conv_layer.weight[:,:3,:,:].detach()
-		self._w = self._w.transpose(1,2).transpose(2,3)
-		self._ikn = intra_kernel_norm
-		self._init_plot(figsize)
-
-	def _init_plot(self, figsize):
-		self._fig = plt.figure(figsize=figsize)
-		self._vals = np.zeros((self._Sy*self._Ky,self._Sx*self._Kx,3))
-		self._img = plt.imshow(self._vals)
-		plt.axis('off')
-		self._fig.show()
+		# Initialize visualization window
+		pygame.init()
+		self._screen = pygame.display.set_mode((self.window_width, self.window_width))
+		pygame.display.set_caption("Weights")
 
 	def update(self):
-		self._update_img(intra_norm=self._ikn)
+		self._update_img()
 
-class LinearLayerVisualizer(LayerVisualizer):
-	"""
-	Visualize convergence of weights of a linear layer.
-	"""
-
-	def __init__(self, linear_layer, figsize=(5,5), as_heatmap=False, img_size=None):
-		self._n = linear_layer.out_features
-		self._d = linear_layer.in_features
-		self._w = linear_layer.weight.detach()
-		self._hm = as_heatmap
-		if as_heatmap:
-			h = self._w.shape[0]
-			d = self._w.shape[1]
-			if img_size is not None:
-				self._Sy, self._Sx = img_size
-				assert self._Sx*self._Sy == d, "img_size doesn't match dimension 1"
-			else:
-				self._Sy = int(np.sqrt(d))
-				self._Sx = d//self._Sy
-				assert self._Sx*self._Sy == self._w.shape[1], \
-					"Can't show vector of size {} as a heatmap".format(d)
-				self._Ky = int(np.sqrt(h))
-				self._Kx = h//self._Ky
-			self._w = self._w.view(h, self._Sy, self._Sx, 1)
-		else:
-			self._w = self._w.t()
-		self._init_plot(figsize)
-
-	def _init_plot(self, figsize):
-		self._fig = plt.figure(figsize=figsize)
-		if self._hm:
-			self._vals = np.zeros((self._Sy*self._Ky, self._Sx*self._Kx, 1))
-			self._img = plt.imshow(self._vals[:,:,0], cmap='bwr', vmin=-0.5, vmax=0.5)
-			self._fig.colorbar(self._img)
-			plt.axis('off')
-		self._fig.show()
-
-	def update(self):
-		if self._hm:
-			self._update_img(monochrome=True)
-		else:
-			self._fig.clf()
-			w0 = self._w.numpy()
-			plt.plot(np.sum(w0, axis=1))
-			self._fig.canvas.draw()
+	def _update_img(self, intra_norm=False):
+		# Sy, Sx = self._Sy, self._Sx
+		# for i in range(self._n):
+		# 	y, x = i // self._Kx, i % self._Kx
+		# 	kernel = self._w[i].cpu().numpy()
+		# 	if intra_norm:
+		# 		kernel -= np.amin(kernel)
+		# 		kernel /= np.amax(kernel) + 1e-10
+		# 	self._vals[y * Sy:(y + 1) * Sy, x * Sx:(x + 1) * Sx, :] = kernel
+		weights = self.weights.permute((0, 2, 1, 3, 4))
+		if weights.shape[-1] == 1:
+			weights = weights.tile((1, 1, 1, 1, 3))
+		weights = weights.reshape(self._Ky * self._Sy, self._Kx * self._Sx, 3)
+		weights = weights.cpu().numpy()
+		vmax = np.amax(np.abs(weights))
+		img = (weights + vmax) / (2 * vmax + 1e-10)
+		img = (255 * img).astype(np.uint8)
+		img = pygame.surfarray.make_surface(img)
+		img = pygame.transform.scale(img, (250, 250))
+		img = pygame.transform.rotate(img, -90)
+		img = pygame.transform.flip(img, True, False)
+		self._screen.blit(img, (0, 0))
+		pygame.display.flip()
