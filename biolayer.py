@@ -3,9 +3,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import TensorDataset, DataLoader
 from time import time
-from pynput import keyboard
 
 no_grad_tensor = lambda x: torch.tensor(x, dtype=torch.float, requires_grad=False)
+
 
 def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 	with torch.no_grad():
@@ -38,23 +38,24 @@ def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 		nc=ds.abs().max() + prec
 		return eps*(ds/nc)
 
-class _BioBase(object):
-	def __init__(self, p=2.0, delta=0.4, k=2):
-		assert p >= 2, 'Lebesgue norm must be greater or equal than 2'
-		assert k >= 2, 'ranking parameter must be greater or equal than 2'
+
+class _BioBase:
+
+	def __init__(self, *args, p=2.0, delta=0.4, k=2, **kwargs):
+		super().__init__(*args, **kwargs)
+		assert p >= 2, 'Lebesgue norm p must be greater or equal than 2'
+		assert k >= 2, 'ranking parameter k must be greater or equal than 2'
 		n_hiddens = getattr(self, 'out_features', None) or self.out_channels
-		assert k <= n_hiddens, "ranking parameter can't exceed number of hidden units"
+		assert k <= n_hiddens, "ranking parameter k can't exceed number of hidden units"
 		self._p = no_grad_tensor(p)
 		self._delta = no_grad_tensor(delta)
 		self._k = k
-		self.weight.data.uniform_(1e-5,0.5)
-		w = self.weight.data
-		with torch.no_grad():
-			if len(self.weight) == 4:
-				norm = w.view(w.shape[0], -1).norm(1).view(w.shape[0],1,1,1)
-			else:
-				norm = w.norm(1)
-			w /= norm
+
+	def reset_parameters(self):
+		# I don't know yet why +uniform init works better, but it does.
+		self.weight.data.uniform_(1e-5, 1.0)
+		if self.bias is not None:
+			self.bias.data.uniform_(1e-5, 1.0)
 
 	def train_step(self, inputs, eps):
 		raise NotImplementedError
@@ -89,57 +90,62 @@ class _BioBase(object):
 					t0 = time()
 					yield self.weight.data
 
+
 class BioLinear(_BioBase, nn.Linear):
 
-	def __init__(self, in_features, out_features, **kwargs):
-		nn.Linear.__init__(self, in_features, out_features, bias=False)
-		_BioBase.__init__(self, **kwargs)
+	def __init__(self, *args, bias=False, **kwargs):
+		assert not bias, "Linear layers currently work only without bias."
+		super().__init__(*args, **kwargs)
 
 	def train_step(self, inputs, eps):
 		synapses = self.weight.data
 		wdelta = _compute_step_linear(inputs, synapses, self._p, self._delta, self._k, eps)
 		synapses += wdelta
 
+
 class BioConv2d(_BioBase, nn.Conv2d):
-	def __init__(self, in_channels, out_channels, kernel_size,
-		stride=1, padding=0, dilation=1, **kwargs):
-		nn.Conv2d.__init__(self, in_channels, out_channels, kernel_size,
-			stride=stride, padding=padding, dilation=dilation, bias=False)
-		_BioBase.__init__(self, **kwargs)
-		self._in_features = in_channels*kernel_size*kernel_size
-		self._output_shape = None
+
+	def __init__(self, *args, n_random_patches: int = 0, **kwargs):
+		super().__init__(*args, **kwargs)
+		in_channels, kernel_size = self.weight.shape[1:3]
+		self._in_features = in_channels * kernel_size * kernel_size
+		self._n_random_patches = n_random_patches
 
 	def _extract_blocks(self, inputs):
-		return F.unfold(inputs, self.kernel_size,
-			dilation=self.dilation, padding=self.padding, stride=self.stride)
+		return F.unfold(inputs, self.kernel_size, dilation=self.dilation, padding=self.padding, stride=self.stride)
 
 	def train_step(self, inputs, eps):
-		assert len(inputs.shape) == 4, 'Inputs must be images with shape [B,C,H,W], {}'.format(inputs.shape)
+		dims = len(inputs.shape)
+		assert dims == 4, f'Inputs must be images with shape [B,C,H,W], but a tensor of {dims} dimensions was given.'
 		synapses = self.weight.data
 		
 		with torch.no_grad():
 			blocks = self._extract_blocks(inputs)
 
-			"""
-			TODO include random patch selection?
-			It seems that it generates more diverse patches, as there is
-			high redundancy intra-image.
-			"""
-			random_patches = False
-			if random_patches:
+			# Might generate more diverse patches, as there is high intra-image redundancy.
+			if self._n_random_patches > 0:
 				perm = torch.randperm(blocks.size(2))
-				idx = perm[:5]
+				idx = perm[:self._n_random_patches]
 				blocks = blocks[:,:,idx]
 
 			blocks = blocks.transpose(2,1).contiguous().view(-1, self._in_features)
 			syn_flat = synapses.view(synapses.shape[0], -1)
+			if self.bias is not None:
+				blocks = torch.cat([blocks, torch.ones(blocks.size(0), 1)], dim=1)
+				syn_flat = torch.cat([syn_flat, self.bias.view(-1, 1)], dim=1)
 
-		wdelta = _compute_step_linear(blocks, syn_flat, self._p, self._delta, self._k, eps)
+			wdelta = _compute_step_linear(blocks, syn_flat, self._p, self._delta, self._k, eps)
 
-		with torch.no_grad():
-			syn_flat += wdelta
+			if self.bias is not None:
+				syn_flat = synapses.view(synapses.shape[0], -1)
+				syn_flat += wdelta[:,:-1]
+				self.bias.data += wdelta[:,-1]
+			else:
+				syn_flat += wdelta
+
 
 def _compute_step_conv(inputs, synapses, stride, padding, dilation, p, delta, k, eps):
+	# TODO: (in construction) compute the learning step without the flattening of patches and kernels.
 	with torch.no_grad():
 		prec = no_grad_tensor(1e-30)
 		hid = synapses.shape[0]
@@ -163,12 +169,12 @@ def _compute_step_conv(inputs, synapses, stride, padding, dilation, p, delta, k,
 			values[y, idx_batch] = -1e10
 			y = torch.argmax(values, 0)
 		y2 = y
-		yl=torch.zeros(hid, Num) # Por cada neurona, tantas veces como se ejecutó
-		yl[y1, idx_batch]=1.0 # 1 a la que se activó más
+		yl=torch.zeros(hid, Num) # For each neuron, as many times as it was ran
+		yl[y1, idx_batch]=1.0 # 1 to the one with highest activation
 		yl[y2, idx_batch]=-delta
 
 		xx=(yl*tot_input_flat).sum(1) # [hid]
-		# [hid,Num] x [Num,D] --> [hid,D] (acumula refuerzo por sinapsis)
+		# [hid,Num] x [Num,D] --> [hid,D] (accumulates reinforcement per-synapsis)
 		# Num ~ batch*H2*W2
 		# D ~ C*k1*k2
 

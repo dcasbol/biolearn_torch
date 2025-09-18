@@ -3,6 +3,7 @@ import matplotlib.pyplot as plt
 from biolayer import BioLinear
 from visualization import LinearLayerVisualizer
 from torchvision.datasets import MNIST
+import torch.nn.functional as F
 
 MNIST_DIR = '~/DataSets/'
 
@@ -17,9 +18,10 @@ Ky=5
 hid=Kx*Ky    # number of hidden units that are displayed in Ky by Kx array
 
 M = MNIST(MNIST_DIR, download=True).data.detach().view(-1, 28*28).float()
-M -= M.mean(0)
+M -= M.mean(0, keepdim=True)
+M = F.pad(M, (0,1), value=1)
 
-bio_linear = BioLinear(N, hid)
+bio_linear = BioLinear(N+1, hid)
 vis = LinearLayerVisualizer(bio_linear, as_heatmap=True)
 
 try:
