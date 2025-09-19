@@ -1,0 +1,5 @@
+# Python 3.10
+torch==2.5.1
+torchvision==0.20.1
+numpy==2.2.1
+pygame==2.6.1

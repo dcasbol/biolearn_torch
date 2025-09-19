@@ -9,34 +9,33 @@ no_grad_tensor = lambda x: torch.tensor(x, dtype=torch.float, requires_grad=Fals
 
 def _compute_step_linear(inputs, synapses, p, delta, k, eps):
 	with torch.no_grad():
-		inputs /= inputs.norm(1) + 1e-10
+		inputs = inputs / (inputs.norm(dim=1, keepdim=True) + 1e-10)
 
 		prec = no_grad_tensor(1e-30)
-		hid = synapses.shape[0]
-		Num = inputs.shape[0]
-		N = inputs.shape[1]
-		idx_batch = torch.arange(Num)
+		num_hidden = synapses.shape[0]
+		batch_size, num_inputs = inputs.shape[0:2]
+		idx_batch = torch.arange(batch_size)
 
-		sig=synapses.sign()
-		tot_input=torch.matmul(sig*synapses.abs().pow(p-1), inputs.t())
+		sig = synapses.sign()
+		tot_input = torch.matmul(sig * synapses.abs().pow(p-1), inputs.t())
 
 		values = tot_input.clone()
 		y1 = torch.argmax(values, 0)
 		y = y1
 		for i in range(k-1):
-			values[y,idx_batch] = -1e10
+			values[y, idx_batch] = -1e10
 			y = torch.argmax(values, 0)
 		y2 = y
 
-		yl=torch.zeros(hid, Num)
-		yl[y1,idx_batch]=1.
-		yl[y2,idx_batch]=-delta*(tot_input[y2,idx_batch]>0).float()
+		yl = torch.zeros(num_hidden, batch_size)
+		yl[y1, idx_batch]= 1
+		yl[y2, idx_batch]= -delta * (tot_input[y2, idx_batch] > 0).float()
 		
-		xx=(yl*tot_input).sum(1)
-		ds  = torch.matmul(yl,inputs) - xx.view(xx.shape[0],1).repeat(1,N)*synapses
+		xx = (yl * tot_input).sum(1)
+		ds  = torch.matmul(yl, inputs) - xx.view(xx.shape[0], 1).repeat(1, num_inputs) * synapses
 		
-		nc=ds.abs().max() + prec
-		return eps*(ds/nc)
+		nc = ds.abs().max() + prec
+		return eps * (ds / nc)
 
 
 class _BioBase:
@@ -70,10 +69,7 @@ class _BioBase:
 
 	def _train_from_tensor(self, train_data, epochs=None, batch_size=100, epsilon=2e-2):
 		dataset = TensorDataset(train_data)
-		loader  = DataLoader(dataset,
-			batch_size = batch_size,
-			shuffle    = True
-		)
+		loader  = DataLoader(dataset, batch_size=batch_size, shuffle=True)
 		return self._train_from_dataloader(loader, epochs, epsilon=epsilon)
 
 	def _train_from_dataloader(self, loader, epochs=None, epsilon=2e-2):
@@ -101,6 +97,7 @@ class BioLinear(_BioBase, nn.Linear):
 		synapses = self.weight.data
 		wdelta = _compute_step_linear(inputs, synapses, self._p, self._delta, self._k, eps)
 		synapses += wdelta
+		# synapses *= (1 - 1e-5)  # TODO: add weight decay
 
 
 class BioConv2d(_BioBase, nn.Conv2d):
