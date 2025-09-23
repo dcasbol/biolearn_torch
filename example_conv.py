@@ -22,7 +22,8 @@ with torch.no_grad():
 
 bio_conv = BioConv2d(3, num_neurons, kernel_size, stride=3)
 weights = bio_conv.weight[:, :3, :, :].permute((0, 2, 3, 1))
-vis = LayerVisualizer(weights)
+vis = LayerVisualizer(weights, layer_id="Kernels")
 
 for weight in bio_conv.train(cifar_data, batch_size=batch_size, epsilon=learning_rate):
-	vis.update()
+	if not vis.update():
+		break

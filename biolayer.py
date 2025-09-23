@@ -78,10 +78,8 @@ class _BioBase:
 		nep = -1
 		while epochs is None or nep < epochs:
 			nep += 1
-			ep = min(nep, max_epochs-1)
-			eps = epsilon*(1-ep/max_epochs)
 			for i, batch_samples in enumerate(loader):
-				self.train_step(batch_samples[0], eps)
+				self.train_step(batch_samples[0], epsilon)
 				if epochs is None and time()-t0 >= 0.25:
 					t0 = time()
 					yield self.weight.data

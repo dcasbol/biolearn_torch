@@ -13,10 +13,8 @@ M = MNIST(MNIST_DIR, download=True).data.detach().view(-1, 28 * 28).float()
 M = (M - M.mean(0)) / 255.0
 
 bio_linear = BioLinear(num_inputs, num_neurons)
-vis = LayerVisualizer(bio_linear.weight)
+vis = LayerVisualizer(bio_linear.weight, layer_id="Weights")
 
-try:
-	for weight in bio_linear.train(M, batch_size=batch_size, epsilon=learning_rate):
-		vis.update()
-except KeyboardInterrupt:
-	pass
+for weight in bio_linear.train(M, batch_size=batch_size, epsilon=learning_rate):
+	if not vis.update():
+		break

@@ -4,12 +4,22 @@ import numpy as np
 from dataclasses import dataclass
 
 
+WHITE = (255, 255, 255)
+BLACK = (0, 0, 0)
+BLUE = (70, 130, 180)
+DARK_BLUE = (30, 90, 150)
+
+
 @dataclass
 class LayerVisualizer(object):
 	weights: torch.Tensor
-	window_width: int = 250
+	layer_id: str = "No Layer ID Provided"
+	width: int = 500
+	height: int = 500
 
 	def __post_init__(self):
+
+		vspace = self.height
 
 		# Keep a view of weights which is more suitable for visualization
 		weights = self.weights.detach()
@@ -29,11 +39,34 @@ class LayerVisualizer(object):
 
 		# Initialize visualization window
 		pygame.init()
-		self._screen = pygame.display.set_mode((self.window_width, self.window_width))
-		pygame.display.set_caption("Weights")
+		self._screen = pygame.display.set_mode((self.width, self.height))
+		pygame.display.set_caption("U-Training")
+		self._screen.fill(WHITE)
 
-	def update(self):
+		font = pygame.font.SysFont(None, 48)
+		title_text = font.render(self.layer_id, True, BLACK)
+		title_rect = title_text.get_rect(center=(self.width // 2, 50))
+		self._screen.blit(title_text, title_rect)
+		vspace -= 50 + 48 // 2
+
+		button_font = pygame.font.SysFont(None, 36)
+		button_width = 150
+		self._button_rect = pygame.Rect(self.width // 2 - button_width // 2, self.height - 60, button_width, 50)
+		self._button_text = button_font.render("Stop", True, WHITE)
+		vspace -= 60 + 50 // 2
+		self._vspace = vspace
+
+	def update(self) -> bool:
 		self._update_img()
+		self._update_button()
+		pygame.display.flip()
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				return False
+			elif event.type == pygame.MOUSEBUTTONDOWN:
+				if self._button_rect.collidepoint(event.pos):
+					return False
+		return True
 
 	def _update_img(self, intra_norm=False):
 		# Sy, Sx = self._Sy, self._Sx
@@ -53,8 +86,16 @@ class LayerVisualizer(object):
 		img = (weights + vmax) / (2 * vmax + 1e-10)
 		img = (255 * img).astype(np.uint8)
 		img = pygame.surfarray.make_surface(img)
-		img = pygame.transform.scale(img, (250, 250))
+		img_size = min(self.width, self._vspace) * 0.95
+		img = pygame.transform.scale(img, (img_size, img_size))
 		img = pygame.transform.rotate(img, -90)
 		img = pygame.transform.flip(img, True, False)
-		self._screen.blit(img, (0, 0))
-		pygame.display.flip()
+		img_rect = img.get_rect(center=(self.width // 2, self.height // 2))
+		self._screen.blit(img, img_rect)
+
+	def _update_button(self):
+		mouse_pos = pygame.mouse.get_pos()
+		color = BLUE if self._button_rect.collidepoint(mouse_pos) else DARK_BLUE
+		pygame.draw.rect(self._screen, color, self._button_rect)
+		text_rect = self._button_text.get_rect(center=self._button_rect.center)
+		self._screen.blit(self._button_text, text_rect)
