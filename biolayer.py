@@ -102,8 +102,8 @@ class BioConv2d(_BioBase, nn.Conv2d):
 
 	def __init__(self, *args, n_random_patches: int = 0, **kwargs):
 		super().__init__(*args, **kwargs)
-		in_channels, kernel_size = self.weight.shape[1:3]
-		self._in_features = in_channels * kernel_size * kernel_size
+		in_channels, kernel_height, kernel_width = self.weight.shape[1:]
+		self._in_features = in_channels * kernel_height * kernel_width
 		self._n_random_patches = n_random_patches
 
 	def _extract_blocks(self, inputs):

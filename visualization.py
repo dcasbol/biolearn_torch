@@ -1,6 +1,7 @@
 import pygame
 import torch
 import numpy as np
+from math import sqrt, ceil
 from dataclasses import dataclass
 
 
@@ -17,25 +18,31 @@ class LayerVisualizer(object):
 	width: int = 500
 	height: int = 500
 
+	@torch.no_grad()
 	def __post_init__(self):
 
 		vspace = self.height
 
 		# Keep a view of weights which is more suitable for visualization
-		weights = self.weights.detach()
-		if len(weights.shape) == 2:
-			num_neurons, num_inputs = weights.shape
+		assert len(self.weights.shape) in [2, 4]
+		if len(self.weights.shape) == 2:
+			num_neurons, num_inputs = self.weights.shape
 			depth = 1
+			# TODO: change Sy, Sx, Ky, Kx for something more meaningful
+			#       moreover, it's confusing right now.
+			self._Sy, self._Sx = best_fitting_size(num_inputs)
 		else:
-			num_neurons, kernel_height, kernel_width, depth = weights.shape
+			num_neurons, kernel_height, kernel_width, depth = self.weights.shape
 			num_inputs = kernel_height * kernel_width
-		self._Sy = int(np.sqrt(num_inputs))
-		self._Sx = num_inputs//self._Sy
-		assert self._Sx * self._Sy == num_inputs, \
-			f"Inputs and outputs should be square, got {num_inputs=}, {num_neurons=}"
-		self._Ky = int(np.sqrt(num_neurons))
-		self._Kx = num_neurons//self._Ky
-		self.weights = weights.view(self._Ky, self._Kx, self._Sy, self._Sx, depth)
+			self._Sy = kernel_height
+			self._Sx = kernel_width
+
+		self._Ky, self._Kx = best_fitting_size(num_neurons)
+		self.weights = self.weights.view(num_neurons, num_inputs, depth)
+		self._num_neurons = num_neurons
+		self._num_inputs = num_inputs
+		self._depth = depth
+		self._canvas = torch.zeros(self._Ky * self._Kx, self._Sy * self._Sx, 1 if depth == 1 else 3)
 
 		# Initialize visualization window
 		pygame.init()
@@ -68,16 +75,12 @@ class LayerVisualizer(object):
 					return False
 		return True
 
-	def _update_img(self, intra_norm=False):
-		# Sy, Sx = self._Sy, self._Sx
-		# for i in range(self._n):
-		# 	y, x = i // self._Kx, i % self._Kx
-		# 	kernel = self._w[i].cpu().numpy()
-		# 	if intra_norm:
-		# 		kernel -= np.amin(kernel)
-		# 		kernel /= np.amax(kernel) + 1e-10
-		# 	self._vals[y * Sy:(y + 1) * Sy, x * Sx:(x + 1) * Sx, :] = kernel
-		weights = self.weights.permute((0, 2, 1, 3, 4))
+	@torch.no_grad()
+	def _update_img(self):
+		depth = min(self._depth, 3)
+		self._canvas[:self._num_neurons, :self._num_inputs, :depth] = self.weights[:, :, :depth]
+		weights = self._canvas.view(self._Ky, self._Kx, self._Sy, self._Sx, -1)
+		weights = weights.permute((0, 2, 1, 3, 4))
 		if weights.shape[-1] == 1:
 			weights = weights.tile((1, 1, 1, 1, 3))
 		weights = weights.reshape(self._Ky * self._Sy, self._Kx * self._Sx, 3)
@@ -99,3 +102,16 @@ class LayerVisualizer(object):
 		pygame.draw.rect(self._screen, color, self._button_rect)
 		text_rect = self._button_text.get_rect(center=self._button_rect.center)
 		self._screen.blit(self._button_text, text_rect)
+
+
+def best_fitting_size(n: int) -> tuple[int, int]:
+	min_remainder = 1_000_000
+	width, height = 1, n
+	for i in range(2, ceil(sqrt(n)) + 1):
+		w = i
+		h = ceil(n / w)
+		r = (w * h) - n
+		if r < min_remainder or (r == min_remainder and w > width):
+			min_remainder = r
+			width, height = w, h
+	return width, height
