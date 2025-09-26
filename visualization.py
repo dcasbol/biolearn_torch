@@ -82,9 +82,9 @@ class LayerVisualizer(object):
 
 		# Copy weight values over to canvas, where some empty spots can be left
 		if self._depth > 3:
-			d = max(1, round(self._depth / 3))
-			for i in range(3):
-				self._canvas[:self._num_neurons, :self._num_inputs, i] = self.weights[:, :, i*d:(i+1)*d].mean(dim=2)
+			sensitivity_levels = self.weights.view(self._num_neurons * self._num_inputs, self._depth).mean(dim=0)
+			depth_idx = sensitivity_levels.argsort(stable=True, descending=True)[:3]
+			self._canvas[:self._num_neurons, :self._num_inputs, :] = self.weights[:, :, depth_idx]
 		else:
 			depth = min(self._depth, 3)
 			self._canvas[:self._num_neurons, :self._num_inputs, :depth] = self.weights[:, :, :depth]
