@@ -1,12 +1,12 @@
 import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader
 from torchvision.datasets import CIFAR10
-from biolayer import BioConv2d
-from visualization import LayerVisualizer
+from training import train_layer
 
 CIFAR_DIR = '~/DataSets/'
 
 batch_size = 50
-learning_rate = 2e-3
 kernel_size = 5
 num_neurons = 10 * 10
 
@@ -20,10 +20,6 @@ with torch.no_grad():
 	cifar_data = torch.tensor(cifar.data.view(), dtype=torch.float) / 255
 	cifar_data = cifar_data.transpose(1,3).transpose(2,3) # [B,H,W,C] --> [B,C,H,W]
 
-bio_conv = BioConv2d(3, num_neurons, kernel_size, stride=3)
-weights = bio_conv.weight[:, :3, :, :].permute((0, 2, 3, 1))
-vis = LayerVisualizer(weights, layer_id="Kernels")
-
-for weight in bio_conv.train(cifar_data, batch_size=batch_size, epsilon=learning_rate):
-	if not vis.update():
-		break
+conv = nn.Conv2d(3, num_neurons, kernel_size, stride=3, bias=False)
+data_loader = DataLoader(cifar_data, batch_size=batch_size, shuffle=True, drop_last=True)
+train_layer(conv, data_loader, n_random_patches=2 * num_neurons)

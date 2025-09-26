@@ -1,20 +1,17 @@
-from biolayer import BioLinear
-from visualization import LayerVisualizer
+import torch.nn as nn
+from torch.utils.data import DataLoader
 from torchvision.datasets import MNIST
+from training import train_layer
 
 MNIST_DIR = '~/DataSets/'
 
 num_inputs = 784
 batch_size = 32
-learning_rate = 2e-3
 num_neurons = 5 * 5
 
 M = MNIST(MNIST_DIR, download=True).data.detach().view(-1, 28 * 28).float()
 M = (M - M.mean(0)) / 255.0
 
-bio_linear = BioLinear(num_inputs, num_neurons)
-vis = LayerVisualizer(bio_linear.weight, layer_id="Weights")
-
-for weight in bio_linear.train(M, batch_size=batch_size, epsilon=learning_rate):
-	if not vis.update():
-		break
+linear = nn.Linear(num_inputs, num_neurons, bias=False)
+data_loader = DataLoader(M, batch_size=batch_size, shuffle=True, drop_last=True)
+train_layer(linear, data_loader)

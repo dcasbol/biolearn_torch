@@ -36,14 +36,14 @@ class LayerVisualizer(object):
 			self._in_width = kernel_width
 
 		self._out_height, self._out_width = best_fitting_size(num_neurons)
-		self.weights = self.weights.view(num_neurons, num_inputs, depth)
+		self.weights = self.weights.view(num_neurons, depth, num_inputs)
 		self._num_neurons = num_neurons
 		self._num_inputs = num_inputs
 		self._depth = depth
 		self._canvas = torch.zeros(
 			self._out_height * self._out_width,
-			self._in_height * self._in_width,
 			1 if depth == 1 else 3,
+			self._in_height * self._in_width,
 		)
 
 		# Initialize visualization window
@@ -82,16 +82,16 @@ class LayerVisualizer(object):
 
 		# Copy weight values over to canvas, where some empty spots can be left
 		if self._depth > 3:
-			sensitivity_levels = self.weights.view(self._num_neurons * self._num_inputs, self._depth).mean(dim=0)
+			sensitivity_levels = self.weights.mean(dim=(0, 2))
 			depth_idx = sensitivity_levels.argsort(stable=True, descending=True)[:3]
-			self._canvas[:self._num_neurons, :self._num_inputs, :] = self.weights[:, :, depth_idx]
+			self._canvas[:self._num_neurons, :, :self._num_inputs] = self.weights[:, depth_idx, :]
 		else:
 			depth = min(self._depth, 3)
-			self._canvas[:self._num_neurons, :self._num_inputs, :depth] = self.weights[:, :, :depth]
+			self._canvas[:self._num_neurons, :depth, :self._num_inputs] = self.weights
 
 		# Reshape canvas so we can show neurons' weights in a grid
-		weights = self._canvas.view(self._out_height, self._out_width, self._in_height, self._in_width, -1)
-		weights = weights.permute((0, 2, 1, 3, 4))
+		weights = self._canvas.view(self._out_height, self._out_width, -1, self._in_height, self._in_width)
+		weights = weights.permute((0, 3, 1, 4, 2))
 		if weights.shape[-1] == 1:
 			weights = weights.tile((1, 1, 1, 1, 3))
 		weights = weights.reshape(self._out_height * self._in_height, self._out_width * self._in_width, 3)
