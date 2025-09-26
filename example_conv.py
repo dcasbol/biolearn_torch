@@ -7,8 +7,8 @@ CIFAR_DIR = '~/DataSets/'
 
 batch_size = 50
 learning_rate = 2e-3
-kernel_size = (5, 3)
-num_neurons = 11
+kernel_size = 5
+num_neurons = 10 * 10
 
 """
 Hebbian learning works best with positive inputs, which is also optimal when ReLU

@@ -28,21 +28,23 @@ class LayerVisualizer(object):
 		if len(self.weights.shape) == 2:
 			num_neurons, num_inputs = self.weights.shape
 			depth = 1
-			# TODO: change Sy, Sx, Ky, Kx for something more meaningful
-			#       moreover, it's confusing right now.
-			self._Sy, self._Sx = best_fitting_size(num_inputs)
+			self._in_height, self._in_width = best_fitting_size(num_inputs)
 		else:
-			num_neurons, kernel_height, kernel_width, depth = self.weights.shape
+			num_neurons, depth, kernel_height, kernel_width = self.weights.shape
 			num_inputs = kernel_height * kernel_width
-			self._Sy = kernel_height
-			self._Sx = kernel_width
+			self._in_height = kernel_height
+			self._in_width = kernel_width
 
-		self._Ky, self._Kx = best_fitting_size(num_neurons)
+		self._out_height, self._out_width = best_fitting_size(num_neurons)
 		self.weights = self.weights.view(num_neurons, num_inputs, depth)
 		self._num_neurons = num_neurons
 		self._num_inputs = num_inputs
 		self._depth = depth
-		self._canvas = torch.zeros(self._Ky * self._Kx, self._Sy * self._Sx, 1 if depth == 1 else 3)
+		self._canvas = torch.zeros(
+			self._out_height * self._out_width,
+			self._in_height * self._in_width,
+			1 if depth == 1 else 3,
+		)
 
 		# Initialize visualization window
 		pygame.init()
@@ -50,7 +52,7 @@ class LayerVisualizer(object):
 		pygame.display.set_caption("U-Training")
 		self._screen.fill(WHITE)
 
-		font = pygame.font.SysFont(None, 48)
+		font = pygame.font.SysFont(None, 24)
 		title_text = font.render(self.layer_id, True, BLACK)
 		title_rect = title_text.get_rect(center=(self.width // 2, 50))
 		self._screen.blit(title_text, title_rect)
@@ -77,14 +79,24 @@ class LayerVisualizer(object):
 
 	@torch.no_grad()
 	def _update_img(self):
-		depth = min(self._depth, 3)
-		self._canvas[:self._num_neurons, :self._num_inputs, :depth] = self.weights[:, :, :depth]
-		weights = self._canvas.view(self._Ky, self._Kx, self._Sy, self._Sx, -1)
+
+		# Copy weight values over to canvas, where some empty spots can be left
+		if self._depth > 3:
+			d = max(1, round(self._depth / 3))
+			for i in range(3):
+				self._canvas[:self._num_neurons, :self._num_inputs, i] = self.weights[:, :, i*d:(i+1)*d].mean(dim=2)
+		else:
+			depth = min(self._depth, 3)
+			self._canvas[:self._num_neurons, :self._num_inputs, :depth] = self.weights[:, :, :depth]
+
+		# Reshape canvas so we can show neurons' weights in a grid
+		weights = self._canvas.view(self._out_height, self._out_width, self._in_height, self._in_width, -1)
 		weights = weights.permute((0, 2, 1, 3, 4))
 		if weights.shape[-1] == 1:
 			weights = weights.tile((1, 1, 1, 1, 3))
-		weights = weights.reshape(self._Ky * self._Sy, self._Kx * self._Sx, 3)
+		weights = weights.reshape(self._out_height * self._in_height, self._out_width * self._in_width, 3)
 		weights = weights.cpu().numpy()
+
 		vmax = np.amax(np.abs(weights))
 		img = (weights + vmax) / (2 * vmax + 1e-10)
 		img = (255 * img).astype(np.uint8)
